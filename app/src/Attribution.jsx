@@ -2,6 +2,32 @@ import { Fragment, useMemo, useState } from "react";
 import { ComposedChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList } from "recharts";
 import { openExternal, adsManagerUrl, campaignUrl, adsetUrl } from "./links.js";
 import AdPreview, { PlayBadge, playable } from "./AdPreview.jsx";
+import DailyView from "./Daily.jsx";
+
+// attr dd row -> the row shape DailyView reads:
+// [dayIdx, spend, rev, orders, nc_rev, nc_orders, new_visitors, visitors, impressions, clicks]
+const toDaily = r => [r[0], r[1], r[2], r[3], r[8], r[9], r[14], r[15], r[6], r[7]];
+const adsUnder = n => n.kind === "a" ? [n] : n.kind === "s" ? n.kids : n.kids.flatMap(s => s.kids);
+
+// Day-by-day view of one campaign, ad set or ad, the same chart the concept pages use.
+function DailyModal({ node, days, start, end, onClose }) {
+  const ads = useMemo(() => adsUnder(node).map(a => ({ dd: (a.dd || []).map(toDaily) })), [node]);
+  const kind = { c: "Campaign", s: "Ad set", a: "Ad" }[node.kind];
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: "min(1100px, 100%)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 20px 40px rgba(0,0,0,0.2)" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: MUTED, textTransform: "uppercase", letterSpacing: 0.4 }}>{kind} · by day</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={node.name}>{node.name}</div>
+          </div>
+          <button onClick={onClose} style={{ padding: "6px 12px", border: "none", background: INK, color: "#fff", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Close</button>
+        </div>
+        <DailyView ads={ads} days={days} start={start} end={end} roasLabel="Meta ROAS" hasNc={true} />
+      </div>
+    </div>
+  );
+}
 
 // Attribution (Meta), modelled on Moby's Attribution › Meta page: four chart cards
 // for the selected date range, then a Campaigns / Ad Sets / Ads table with the
@@ -131,6 +157,7 @@ export default function Attribution({ attr, days, start, end, accent = "var(--d-
   const [overCol, setOverCol] = useState(null);
   const [colMenu, setColMenu] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [dailyOf, setDailyOf] = useState(null);
 
   const lo = useMemo(() => { if (!start) return 0; const i = days.findIndex(d => d >= start); return i < 0 ? days.length : i; }, [days, start]);
   const hi = useMemo(() => { if (!end) return days.length - 1; let i = days.length - 1; while (i >= 0 && days[i] > end) i--; return i; }, [days, end]);
@@ -474,6 +501,7 @@ export default function Attribution({ attr, days, start, end, accent = "var(--d-
                       {canOpen ? (
                         <button onClick={() => toggle(open, setOpen, n.key)} style={{ border: "none", background: "none", cursor: "pointer", color: MUTED, padding: "0 6px 0 0", fontSize: 11 }}>{open.has(n.key) ? "▾" : "▸"}</button>
                       ) : <span style={{ display: "inline-block", width: 17 }} />}
+                      <button onClick={() => setDailyOf(n)} title="Spend and results by day" style={{ border: `1px solid ${LINE}`, background: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 10, padding: "1px 5px", marginRight: 6 }}>📈</button>
                       {depth > 0 && <span style={{ fontSize: 9, color: MUTED, marginRight: 6, textTransform: "uppercase" }}>{n.kind === "s" ? "ad set" : "ad"}</span>}
                       {url ? (
                         <a href={url} target="_blank" rel="noopener noreferrer" onClick={e => openExternal(e, url)} title={`${n.name}\nOpen in Ads Manager`} style={{ color: INK, textDecoration: "none", borderBottom: `1px dotted ${MUTED}` }}>{n.name}</a>
@@ -509,6 +537,7 @@ export default function Attribution({ attr, days, start, end, accent = "var(--d-
         </div>
       </div>
       <AdPreview ad={preview} onClose={() => setPreview(null)} />
+      {dailyOf && <DailyModal node={dailyOf} days={days} start={start} end={end} onClose={() => setDailyOf(null)} />}
     </div>
   );
 }
