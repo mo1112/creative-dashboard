@@ -1326,7 +1326,7 @@ export default function Dashboard() {
                 <button key={v} onClick={() => setBdView(v)} style={{
                   padding: "6px 14px", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12, fontWeight: 600,
                   background: bdView === v ? "#fff" : "transparent", color: bdView === v ? "#171512" : "#6B7280",
-                }}>{v}</button>
+                }}>{v === "Script" ? (ALL_DIMS_LABELS.script || v) : v}</button>
               ))}
             </div>
 
@@ -1339,8 +1339,8 @@ export default function Dashboard() {
 
             {bdView === "Script" && (
               <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: "1px solid #E5E7EB", overflowX: "auto" }}>
-                <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 12px", color: "#1F2937" }}>Performance by Script / Hook ({scripts.length})</h3>
-                <BreakdownTable rows={scripts} nameLabel="Script" dim="script" onRowClick={r => openModal(`Script: ${r.name}`, `${r.creatives} creatives · Spend ${fmt(r.spend)}`, r.ads)} />
+                <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 12px", color: "#1F2937" }}>Performance by {ALL_DIMS_LABELS.script || "Script / Hook"} ({scripts.length})</h3>
+                <BreakdownTable rows={scripts} nameLabel={ALL_DIMS_LABELS.script || "Script"} dim="script" onRowClick={r => openModal(`${ALL_DIMS_LABELS.script || "Script"}: ${r.name}`, `${r.creatives} creatives · Spend ${fmt(r.spend)}`, r.ads)} />
               </div>
             )}
 

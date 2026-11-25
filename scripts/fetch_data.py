@@ -177,6 +177,8 @@ def build(c, daily, ads, first, start, end):
         for a in sorted(rows, key=lambda a: (not a["tags"].get("structured"), -n(a.get("total")))):
             for k, v in a["tags"].items():
                 tags.setdefault(k, v)
+        # Hand labels from creative teardowns (config.json -> "creative_tags", keyed by creative_key) win over the name.
+        tags.update({k: v for k, v in ((c.get("creative_tags") or {}).get(gk) or {}).items() if k in DIMS and v})
         ids = [a["ad"] for a in rows]
         dd, wk = defaultdict(lambda: [0.0] * 9), defaultdict(lambda: [0.0] * 4)
         for i in ids:
