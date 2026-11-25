@@ -1,0 +1,77 @@
+name: Refresh and deploy
+
+# Pulls the brand's Meta data from Triple Whale, builds the dashboard data, encrypts it with
+# DASHBOARD_PASSWORD and publishes the site to GitHub Pages. Data is never committed; only the
+# encrypted copy is published. If a refresh fails, the last published data is kept.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 */4 * * *'   # about every 4 hours
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      TW_API_KEY: ${{ secrets.TW_API_KEY }}
+      DASHBOARD_CONFIG: ${{ secrets.DASHBOARD_CONFIG }}
+      DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+      LIVE_DATA_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/latest.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet cryptography
+
+      - name: Check secrets
+        run: |
+          missing=""
+          [ -z "$TW_API_KEY" ] && missing="$missing TW_API_KEY"
+          [ -z "$DASHBOARD_CONFIG" ] && [ ! -f config.json ] && missing="$missing DASHBOARD_CONFIG"
+          [ -z "$DASHBOARD_PASSWORD" ] && missing="$missing DASHBOARD_PASSWORD"
+          if [ -n "$missing" ]; then echo "::error::Missing repo secrets:$missing"; exit 1; fi
+
+      - name: Pull data from Triple Whale
+        run: python3 scripts/fetch_data.py
+
+      - name: Encrypt
+        run: python3 scripts/encrypt_data.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build the app
+        working-directory: app
+        env:
+          VITE_GITHUB_REPO: ${{ github.repository }}
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Put the app next to the data
+        run: cp -R app/dist/. public/
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

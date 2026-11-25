@@ -1,0 +1,16 @@
+{
+  "name": "Brand Name",
+  "shop": "your-store.myshopify.com",
+  "business_ids": {
+    "1234567890123456": "9876543210987654"
+  },
+  "labels": {},
+  "naming": {
+    "source": "ad",
+    "separator": "_",
+    "slots": ["creative_no", "product", "angle", "concept", "icp", "format", "strategist", "editor"],
+    "min_slots": 6,
+    "key_slot": "creative_no",
+    "aliases": {}
+  }
+}

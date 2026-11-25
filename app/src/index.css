@@ -1,0 +1,53 @@
+:root {
+  --d-green: #171512;
+  --d-green-2: #24211C;
+  --d-accent: #1F5FD0;
+  --d-mint: #EFEBE4;
+  --d-cream: #F6F4F0;
+  --d-bg: #F6F4F0;
+  --d-line: #E6E1D8;
+  --d-muted: #6E685E;
+  --c-wine: #50000B;
+  --c-wine-deep: #1A0205;
+  --c-cream: #FAF6F2;
+  --c-cream-warm: #F5EDE5;
+  --c-cream-border: #E8DCD0;
+  --c-gold: #DBB15C;
+  --c-gold-soft: #FDE9BF;
+  --c-text: #1A0205;
+  --c-muted: #8a6f68;
+
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-heading: 'Space Grotesk', 'Inter', sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  font-family: var(--font-body);
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--d-bg);
+  color: var(--c-text);
+  font-family: var(--font-body);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button {
+  font-family: var(--font-body);
+}
+
+input, select, textarea {
+  font-family: var(--font-body);
+}
