@@ -73,8 +73,32 @@ export const DAILY_METRICS = [
   { key: "nvp", label: "% New Vis.", color: "#ca8a04", fmt: v => `${v.toFixed(1)}%` },
 ];
 
-export default function DailyView({ ads, days, start, end, roasLabel = "ROAS", hasNc = true, showTable = true }) {
-  const rows = useMemo(() => dailyRows(ads, days || [], start, end), [ads, days, start, end]);
+// Windows this panel can re-cut itself to, counted back from the newest day in
+// the data. "Selected range" follows whatever the dashboard calendar is on.
+export const DAY_WINDOWS = [
+  ["range", "Selected range", null],
+  ["today", "Today", 1],
+  ["yday", "Yesterday", -1],
+  ["d7", "Last 7 days", 7],
+  ["d14", "Last 14 days", 14],
+  ["d30", "Last 30 days", 30],
+  ["d60", "Last 60 days", 60],
+  ["d90", "Last 90 days", 90],
+  ["all", "All time", 0],
+];
+
+export default function DailyView({ ads, days, start, end, roasLabel = "ROAS", hasNc = true, showTable = true, windowPicker = true }) {
+  const [win, setWin] = useState("range");
+  // Resolve the picked window to a start/end pair that overrides the parent's.
+  const [winStart, winEnd] = useMemo(() => {
+    if (win === "range" || !days?.length) return [start, end];
+    const last = days.length - 1;
+    const n = DAY_WINDOWS.find(w => w[0] === win)?.[2] ?? 0;
+    if (n === -1) return [days[Math.max(0, last - 1)], days[Math.max(0, last - 1)]]; // yesterday only
+    if (n === 0) return [days[0], days[last]];                                        // all time
+    return [days[Math.max(0, last - (n - 1))], days[last]];
+  }, [win, days, start, end]);
+  const rows = useMemo(() => dailyRows(ads, days || [], winStart, winEnd), [ads, days, winStart, winEnd]);
   const [picked, setPicked] = useState(["roas", "ncroas"]);
   const [gran, setGran] = useState("day");
   const grouped = useMemo(() => groupRows(rows, gran), [rows, gran]);
@@ -91,7 +115,7 @@ export default function DailyView({ ads, days, start, end, roasLabel = "ROAS", h
   };
   const cmpName = gran === "day" ? "DoD" : gran === "week" ? "WoW" : "MoM";
   if (!days || !days.length) return <p style={{ fontSize: 12, color: "#6B7280" }}>Daily data is not available in this build.</p>;
-  if (!rows.length) return <p style={{ fontSize: 12, color: "#6B7280" }}>No days in the selected range.</p>;
+  if (!rows.length) return <p style={{ fontSize: 12, color: "#6B7280" }}>No days with data in this window.</p>;
   const tot = rows.reduce((t, r) => { for (const k of ["spend", "rev", "orders", "nc_rev", "imps", "clicks"]) t[k] += r[k]; return t; },
     { spend: 0, rev: 0, orders: 0, nc_rev: 0, imps: 0, clicks: 0 });
   const chart = [...grouped].reverse().map(r => ({ ...r, day: gran === "month" ? r.date : r.date.slice(5) }));
@@ -99,6 +123,21 @@ export default function DailyView({ ads, days, start, end, roasLabel = "ROAS", h
   const td = { padding: "6px 8px", fontSize: 11, textAlign: "right", borderBottom: "1px solid #F3F4F6" };
   return (
     <div>
+      {windowPicker && days?.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: "#6B7280" }}>Timeframe</span>
+          <div style={{ display: "flex", gap: 3, background: "#F3F4F6", borderRadius: 7, padding: 2, flexWrap: "wrap" }}>
+            {DAY_WINDOWS.map(([k, l]) => (
+              <button key={k} onClick={() => setWin(k)} title={k === "range" ? "Follow the dashboard calendar" : `${l}, up to ${days[days.length - 1]}`}
+                style={{ padding: "4px 10px", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600,
+                  background: win === k ? "#171512" : "transparent", color: win === k ? "#fff" : "#6B7280" }}>{l}</button>
+            ))}
+          </div>
+          <span style={{ fontSize: 10, color: "#9CA3AF" }}>
+            {winStart} → {winEnd}{win !== "range" && " · this panel only"}
+          </span>
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 11, fontWeight: 600, color: "#6B7280" }}>Aggregate by</span>
         <div style={{ display: "flex", gap: 3, background: "#F3F4F6", borderRadius: 7, padding: 2 }}>

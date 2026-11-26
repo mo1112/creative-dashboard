@@ -54,13 +54,27 @@ function presetRange(key, bounds) {
   const mon = addDays(max, -((max.getUTCDay() + 6) % 7));
   const m1 = new Date(Date.UTC(max.getUTCFullYear(), max.getUTCMonth(), 1));
   const r = {
+    today: [max, max], yday: [addDays(max, -1), addDays(max, -1)],
     l7: [addDays(max, -6), max], l14: [addDays(max, -13), max], l30: [addDays(max, -29), max],
+    l60: [addDays(max, -59), max], l90: [addDays(max, -89), max],
     tw: [mon, max], lw: [addDays(mon, -7), addDays(mon, -1)],
     tm: [m1, max], lm: [new Date(Date.UTC(m1.getUTCFullYear(), m1.getUTCMonth() - 1, 1)), addDays(m1, -1)],
   }[key];
-  return r ? [toYy(clip(r[0])), toYy(r[1])] : [null, null];
+  return r ? [toYy(clip(r[0])), toYy(clip(r[1]))] : [null, null];
 }
-const PRESETS = [["l7", "Last 7 days"], ["l14", "Last 14 days"], ["l30", "Last 30 days"], ["tw", "This week"], ["lw", "Last week"], ["tm", "This month"], ["lm", "Last month"], ["all", "All data"]];
+const PRESETS = [["today", "Today"], ["yday", "Yesterday"], ["l7", "Last 7 days"], ["l14", "Last 14 days"], ["l30", "Last 30 days"], ["l60", "Last 60 days"], ["l90", "Last 90 days"], ["all", "All time"], ["tw", "This week"], ["lw", "Last week"], ["tm", "This month"], ["lm", "Last month"]];
+
+// Which preset, if any, the current start/end match - so the dropdown shows
+// what it is on instead of falling back to a placeholder.
+function activePreset(start, end, bounds) {
+  if (!start && !end) return "all";
+  for (const [k] of PRESETS) {
+    if (k === "all") continue;
+    const [a, b] = presetRange(k, bounds);
+    if (a === start && b === end) return k;
+  }
+  return "custom";
+}
 
 function DateRangePicker({ bounds, start, end, setStart, setEnd, mode, setMode, canActivity, compare, setCompare }) {
   if (!bounds) return null;
@@ -85,9 +99,10 @@ function DateRangePicker({ bounds, start, end, setStart, setEnd, mode, setMode, 
       <input type="date" value={yymmddToIso(end) || maxIso} min={minIso} max={maxIso}
         onChange={e => setEnd(isoToYymmdd(e.target.value))}
         style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #D1D5DB", fontSize: 12, color: "#1F2937" }} />
-      <select value="" onChange={e => { const [a, b] = presetRange(e.target.value, bounds); setStart(a); setEnd(b); }}
-        style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #D1D5DB", fontSize: 12, color: "#1F2937" }}>
-        <option value="">Quick range…</option>
+      <select value={activePreset(start, end, bounds)}
+        onChange={e => { if (e.target.value === "custom") return; const [a, b] = presetRange(e.target.value, bounds); setStart(a); setEnd(b); }}
+        style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #D1D5DB", fontSize: 12, fontWeight: 600, color: "#1F2937" }}>
+        {activePreset(start, end, bounds) === "custom" && <option value="custom">Custom range</option>}
         {PRESETS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
       </select>
       {mode === "activity" && canActivity && setCompare && (
@@ -184,15 +199,85 @@ function sortRows(rows, col, dir) {
 }
 
 // --------- Ad list modal (shown when a bucket row is clicked) ---------
+// Windows the drill-down can be re-cut to, independent of the calendar at the
+// top of the dashboard. Counted back from the most recent day in the data.
+const DRILL_WINDOWS = [
+  ["range", "Dashboard range", null],
+  ["d1", "Latest day", 1],
+  ["d7", "7d", 7],
+  ["d14", "14d", 14],
+  ["d30", "30d", 30],
+  ["d60", "60d", 60],
+  ["d90", "90d", 90],
+  ["all", "All time", 0],
+];
+
+// Rebuild one creative's metrics from its daily rows, for an arbitrary window.
+// a.dd rows are [dayIdx, spend, rev, orders, nc_rev, nc_orders, new_visitors,
+// visitors, impressions, clicks], so any window is exact rather than prorated.
+function metricsInWindow(a, lo, hi) {
+  const t = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  for (const r of a.dd || []) {
+    if (r[0] < lo || r[0] > hi) continue;
+    for (let j = 0; j < 9; j++) t[j] += r[j + 1] || 0;
+  }
+  const [spend, rev, txns, nc_rev, nc_txns, nv, vis, imps, clicks] = t;
+  return {
+    ...a.metrics, spend, rev, txns, pixel_rev: rev, pixel_txns: txns, nc_rev, nc_txns,
+    new_visitors: nv, visitors: vis, impressions: imps, clicks,
+    roas: spend ? rev / spend : 0, pixel_roas: spend ? rev / spend : 0,
+    ncroas: spend ? nc_rev / spend : null, nccpa: nc_txns ? spend / nc_txns : null,
+    pct_new: txns ? (nc_txns / txns) * 100 : null, pct_new_visitors: vis ? (nv / vis) * 100 : null,
+    aov: txns ? rev / txns : null, cpa: txns ? spend / txns : null,
+    cpm: imps ? (spend / imps) * 1000 : 0, cpc: clicks ? spend / clicks : null,
+    ctr: imps ? (clicks / imps) * 100 : null, cvr: clicks ? (txns / clicks) * 100 : null,
+  };
+}
+
 function AdListModal({ open, title, subtitle, ads, onClose, days, range, initialMode }) {
   const [sort, setSort] = useState({ col: "spend", dir: "desc" });
   const [mode, setMode] = useState("ads");
   const [focus, setFocus] = useState(null); // one ad shown by day
   const [preview, setPreview] = useState(null); // in-dashboard ad player
-  useEffect(() => { setMode(initialMode || "ads"); setFocus(null); }, [open, title, initialMode]);
-  const sortedAds = useMemo(() => {
+  const [win, setWin] = useState("range"); // drill-down window, independent of the top calendar
+  useEffect(() => { setMode(initialMode || "ads"); setFocus(null); setWin("range"); }, [open, title, initialMode]);
+
+  // Resolve the chosen window to day indices into `days`.
+  const bounds = useMemo(() => {
+    if (!days?.length) return null;
+    const last = days.length - 1;
+    if (win === "range") {
+      const lo = range?.[0] ? days.findIndex(d => d >= range[0]) : 0;
+      const hiRev = range?.[1] ? [...days].reverse().findIndex(d => d <= range[1]) : 0;
+      const hi = hiRev < 0 ? last : last - hiRev;
+      return { lo: lo < 0 ? 0 : lo, hi };
+    }
+    const n = DRILL_WINDOWS.find(w => w[0] === win)?.[2] ?? 0;
+    return { lo: n ? Math.max(0, last - (n - 1)) : 0, hi: last };
+  }, [win, days, range?.[0], range?.[1]]);
+
+  // Re-cut every creative in the list to the chosen window.
+  const viewAds = useMemo(() => {
     if (!ads) return [];
-    return ads.slice().sort((a, b) => {
+    if (win === "range" || !bounds || !days?.length) return ads;
+    return ads
+      .map(a => ({ ...a, metrics: metricsInWindow(a, bounds.lo, bounds.hi) }))
+      .filter(a => {
+        const m = a.metrics;
+        return m.spend > 0 || m.rev > 0 || m.nc_rev > 0 || m.txns > 0 || m.clicks > 0 || m.impressions > 0;
+      });
+  }, [ads, win, bounds, days]);
+
+  const winStart = bounds && days?.length ? days[bounds.lo] : range?.[0];
+  const winEnd = bounds && days?.length ? days[bounds.hi] : range?.[1];
+  // The list itself was built from the dashboard range, so a wider window here
+  // re-cuts these creatives but cannot pull in ones that were dormant then.
+  const widerThanRange = win !== "range" && bounds && range?.[0] && days?.length && days[bounds.lo] < range[0];
+
+  const sortedAds = useMemo(() => {
+    const src = viewAds;
+    if (!src) return [];
+    return src.slice().sort((a, b) => {
       const mul = sort.dir === "desc" ? -1 : 1;
       let va = sort.col === "spend" ? a.metrics.spend
              : sort.col === "rev" ? a.metrics.rev
@@ -215,7 +300,7 @@ function AdListModal({ open, title, subtitle, ads, onClose, days, range, initial
       if (typeof va === "string" && typeof vb === "string") return mul * va.localeCompare(vb);
       return mul * (va - vb);
     });
-  }, [ads, sort]);
+  }, [viewAds, sort]);
 
   if (!open) return null;
 
@@ -243,7 +328,7 @@ function AdListModal({ open, title, subtitle, ads, onClose, days, range, initial
           <div>
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#171512" }}>{title}</h3>
             {subtitle && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6B7280" }}>{subtitle}</p>}
-            <p style={{ margin: "4px 0 0", fontSize: 11, color: "#9CA3AF" }}>{sortedAds.length.toLocaleString()} ads</p>
+            <p style={{ margin: "4px 0 0", fontSize: 11, color: "#9CA3AF" }}>{sortedAds.length.toLocaleString()} ads{win !== "range" && ads?.length !== sortedAds.length ? ` of ${ads.length.toLocaleString()} (the rest had no activity in this window)` : ""}</p>
             {days?.length > 0 && (
               <div style={{ display: "flex", gap: 3, background: "#E5E7EB", borderRadius: 6, padding: 2, marginTop: 8, width: "fit-content" }}>
                 {[["ads", "Ads"], ["daily", "By day"]].map(([k, l]) => (
@@ -251,6 +336,22 @@ function AdListModal({ open, title, subtitle, ads, onClose, days, range, initial
                     background: mode === k && !focus ? "#fff" : "transparent", color: mode === k && !focus ? "#171512" : "#6B7280" }}>{l}</button>
                 ))}
                 {focus && <span style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, color: "#171512", background: "#fff", borderRadius: 5, maxWidth: 420, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={focus.ad_name}>By day: {focus.ad_name}</span>}
+              </div>
+            )}
+            {days?.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ display: "flex", gap: 3, background: "#E5E7EB", borderRadius: 6, padding: 2, width: "fit-content", flexWrap: "wrap" }}>
+                  {DRILL_WINDOWS.map(([k, l]) => (
+                    <button key={k} onClick={() => setWin(k)} title={k === "range" ? "Follow the calendar at the top of the dashboard" : `Last ${l} up to ${days[days.length - 1]}`}
+                      style={{ padding: "4px 10px", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600,
+                        background: win === k ? "#171512" : "transparent", color: win === k ? "#fff" : "#6B7280" }}>{l}</button>
+                  ))}
+                </div>
+                <p style={{ margin: "5px 0 0", fontSize: 11, color: "#9CA3AF" }}>
+                  Showing {winStart} → {winEnd}
+                  {win !== "range" && <> · re-cut inside this panel only, the dashboard above is unchanged</>}
+                  {widerThanRange && <span style={{ color: "#B45309" }}> · this window starts before the dashboard range, so creatives that were dormant then are not in this list</span>}
+                </p>
               </div>
             )}
           </div>
@@ -263,10 +364,11 @@ function AdListModal({ open, title, subtitle, ads, onClose, days, range, initial
           {(mode === "daily" || focus) ? (
             <div>
               <p style={{ fontSize: 11, color: "#9CA3AF", margin: "0 0 8px" }}>
-                {focus ? "This ad" : `All ${sortedAds.length.toLocaleString()} ads in this list`}, day by day for {range?.[0] || days[0]} → {range?.[1] || days[days.length - 1]} (the calendar range at the top). Newest day first.
+                {focus ? "This ad" : `All ${sortedAds.length.toLocaleString()} ads in this list`}, day by day for {winStart} → {winEnd}
+                {win === "range" ? " (the calendar range at the top)" : " (this panel's own window)"}. Newest day first.
                 {focus && <> · <span style={{ color: "#1F5FD0", cursor: "pointer", fontWeight: 600 }} onClick={() => setFocus(null)}>back to ads</span></>}
               </p>
-              <DailyView ads={focus ? [focus] : ads} days={days} start={range?.[0]} end={range?.[1]} roasLabel="Meta ROAS" hasNc={HAS_NC} />
+              <DailyView ads={focus ? [focus] : viewAds} days={days} start={winStart} end={winEnd} roasLabel="Meta ROAS" hasNc={HAS_NC} windowPicker={false} />
             </div>
           ) : (<>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
